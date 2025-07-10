@@ -1,0 +1,57 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v3
+
+      - name: Fix permission for gradlew
+        run: |
+          chmod +x ./gradlew
+
+      - name: Force source change
+        run: echo "// deploy trigger $(date)" >> src/main/java/com/example/campus_sos/CampusSosApplication.java
+
+      - name: Build with Gradle
+        run: ./gradlew clean build -x test --refresh-dependencies
+        env:
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+
+      - name: List built JARs
+        run: ls -al build/libs/
+
+      - name: Remove old JAR on EC2 (optional but safe)
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: rm -f ~/app/build/libs/campus-sos-0.0.1-SNAPSHOT.jar
+
+      - name: Copy JAR to EC2
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          source: "build/libs/campus-sos-0.0.1-SNAPSHOT.jar"
+          target: "~/app/build/libs"
+          strip_components: 2
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            bash ~/deploy.sh
